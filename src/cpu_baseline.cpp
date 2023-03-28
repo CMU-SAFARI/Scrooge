@@ -15,6 +15,7 @@
 #include "../baseline_algorithms/ksw2/ksw2.h"
 #include "../baseline_algorithms/edlib/edlib.h"
 #include "../baseline_algorithms/wfa_lm/wfa_lm.hpp"
+#include "../baseline_algorithms/gact/gact.hpp"
 #include "genasm_cpu.hpp"
 
 #ifdef LIB_WFA
@@ -445,7 +446,39 @@ vector<Alignment_t> benchmark_genasm_cpu(Genome_t &reference, vector<Read_t> &re
     vector<Alignment_t> alignments = genasm_cpu::align_all(reference, reads, threads, &core_algorithm_ns);
 
     double aligns_per_second = 1.0*alignments.size() * 1000*1000*1000 / core_algorithm_ns;
+    cout << fixed << setprecision(2);
     cout << "genasm_cpu: " << aligns_per_second << " aligns/second" << endl;
+
+    return alignments;
+}
+
+vector<Alignment_t> benchmark_custom_gact(Genome_t &reference, vector<Read_t> &reads, AffineGapCosts agc){
+    for (auto & c: reference.content) c = toupper(c);
+    for(Read_t &read: reads)
+        for (auto & c: read.content) c = toupper(c);
+
+    vector<Alignment_t> alignments;
+
+    size_t pair_idx = 0;
+    for(size_t i = 0; i < reads.size(); i++){
+        for(CandidateLocation_t &location : reads[i].locations){
+            string query = reads[i].content;
+            string target = reference.content.substr(location.start_in_reference, reads[i].content.size());
+
+            int T = 320;
+            int O = 120;
+            string cigar = custom_gact(query, target, -agc.gap_open_cost, -agc.gap_extend_cost, agc.match_bonus, -agc.mismatch_cost, T, O);
+            
+            Alignment_t aln;
+            aln.cigar = cigar;
+            alignments.push_back(aln);
+
+            pair_idx++;
+        }
+    }
+
+    cout << fixed << setprecision(2);
+    cout << "custom_gact: " << 1.0 << " aligns/second" << endl;
 
     return alignments;
 }
@@ -579,6 +612,82 @@ void benchmark_wfa_adaptive(Genome_t &reference, vector<Read_t> reads, int threa
     double aligns_per_second = 1.0*num_pairs * 1000*1000*1000 / ns;
     cout << fixed << setprecision(2);
     cout << "wfa_adaptive: " << aligns_per_second << " aligns/second" << endl;
+}
+
+vector<Alignment_t> benchmark_wfa_adaptive_accuracy(Genome_t &reference, vector<Read_t> reads, AffineGapCosts agc){
+    if(enable_log) cerr << "benchmark_wfa_adaptive()..." << endl;
+    long long n = reference.content.size();
+
+    for (auto & c: reference.content) c = toupper(c);
+    for(Read_t &read: reads)
+        for (auto & c: read.content) c = toupper(c);
+
+    affine_penalties_t affine_penalties = {
+        .match = 0,
+        .mismatch = agc.mismatch_cost,
+        .gap_opening = agc.gap_open_cost,
+        .gap_extension = agc.gap_extend_cost
+    };
+    const int min_wavefront_length = 10;
+    const int max_distance_threshold = 50;
+
+    struct wfa_input_pair {
+        char *text;
+        char *pattern;
+        long long n;
+        long long m;
+    };
+    vector<wfa_input_pair> inputs;
+    for(Read_t &read : reads){
+        for(CandidateLocation_t &location : read.locations){
+            wfa_input_pair input;
+            input.pattern = (char*)read.content.c_str();
+            input.m = read.content.size();
+            input.text = (char*)reference.content.c_str() + location.start_in_reference;
+            input.n = min((long long)(input.m), n - location.start_in_reference);
+            inputs.push_back(input);
+        }
+    }
+
+    size_t max_read_length = 0;
+    size_t num_pairs = 0;
+    for(Read_t &read : reads){
+        max_read_length = max(max_read_length, read.content.size());
+        num_pairs += read.locations.size();
+    }
+
+    mm_allocator_t* mm_allocator = mm_allocator_new(BUFFER_SIZE_8M);
+    affine_wavefronts_t* affine_wavefronts = affine_wavefronts_new_reduced(max_read_length, max_read_length*105/100, &affine_penalties, min_wavefront_length, max_distance_threshold, NULL, mm_allocator);
+
+    vector<Alignment_t> alignments;
+    for(long long pair_idx = 0; pair_idx < num_pairs; pair_idx++){
+        affine_wavefronts_align(affine_wavefronts, inputs[pair_idx].pattern, inputs[pair_idx].m, inputs[pair_idx].text, inputs[pair_idx].n);
+        string cigar = "";
+
+        edit_cigar_t* const edit_cigar = &affine_wavefronts->edit_cigar;
+        for (int i=edit_cigar->begin_offset;i<edit_cigar->end_offset;++i) {
+            switch (edit_cigar->operations[i]) {
+            case 'M': cigar += "1="; break;
+            case 'X': cigar += "1X"; break;
+            case 'D': cigar += "1D"; break;
+            case 'I': cigar += "1I"; break;
+            }
+        }
+
+        Alignment_t aln;
+        aln.cigar = cigar;
+        alignments.push_back(aln);
+
+        affine_wavefronts_clear(affine_wavefronts);
+    }
+
+    affine_wavefronts_delete(affine_wavefronts);
+    mm_allocator_delete(mm_allocator);
+
+    cout << fixed << setprecision(2);
+    cout << "wfa_adaptive: " << 1.0 << " aligns/second" << endl;
+
+    return alignments;
 }
 #endif
 
@@ -729,6 +838,14 @@ void accuracy_baselines(string reference_file, string reads_file, string seeds_f
             if(algorithm == "genasm_cpu"){
                 alignments = benchmark_genasm_cpu(genome, reads, thread_count);
             }
+            if(algorithm == "custom_gact"){
+                alignments = benchmark_custom_gact(genome, reads, agc);
+            }
+            #ifdef LIB_WFA
+            if(algorithm == "wfa_adaptive"){
+                alignments = benchmark_wfa_adaptive_accuracy(genome, reads, agc);
+            }
+            #endif
 
             size_t pair_idx = 0;
             for(Read_t &read : reads){
@@ -801,7 +918,7 @@ void parse_args(int argc, char **argv, string &reference_file, string &reads_fil
         "--reads=[path to reads FASTQ]         -- overide default reads data for performance test\n"
         "--seeds=[path to MAF or PAF]          -- overide default seeds data for performance test\n"
         "--threads=[THREADS[,MORE_THREADS]]    -- run benchmarks with the given list of thread counts default:24\n"
-        "--algorithms=[ALGORITHM[,MORE ALGORITHMS]]] -- run only the specified baseline algorithms, supported are: edlib, ksw2_extz, ksw2_extz2_sse, wfa_exact, wfa_adaptive, wfa_lm, genasm_cpu\n"
+        "--algorithms=[ALGORITHM[,MORE ALGORITHMS]]] -- run only the specified baseline algorithms, supported are: edlib, ksw2_extz, ksw2_extz2_sse, wfa_exact, wfa_adaptive, wfa_lm, genasm_cpu, gact_custom\n"
         "--scoring=[MAT],[SUB],[GAPO],[GAPE]   -- set affine gap model scoring function, all values should be positive default:2,4,4,2\n"
         "--verbose                             -- print progress to stderr. Otherwise, only benchmark result are printed\n"
         "--accuracy                            -- print alignment score for each pair (do not run performance experiments)\n"

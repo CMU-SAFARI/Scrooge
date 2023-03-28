@@ -2,6 +2,7 @@ import argparse
 import subprocess
 import re
 import sys
+import platform
 from datetime import datetime
 from itertools import product
 from pathlib import Path
@@ -24,7 +25,7 @@ def run_cpu(W, O, sene, dent, early_termination, threads, reference, reads, seed
     subprocess.run(["mkdir", "-p", "baseline_algorithms/wfa/build"])
     subprocess.run(["make", "-C", "baseline_algorithms/wfa/", "lib_wfa"], capture_output=True)
 
-    compile_base = ["g++", "-o", "cpu_baseline", "-DLIB_WFA", "-Ibaseline_algorithms/wfa", "-Lbaseline_algorithms/wfa/build", "src/cpu_baseline.cpp", "src/genasm_cpu.cpp", "src/util.cpp", "baseline_algorithms/ksw2/ksw2_extz.c", "baseline_algorithms/ksw2/ksw2_extz2_sse.c", "baseline_algorithms/edlib/edlib.cpp", "-std=c++17", "-O3", "-lpthread", "-lstdc++fs", "-lwfa", "-fopenmp"]
+    compile_base = ["g++", "-o", "cpu_baseline", "-DLIB_WFA", "-Ibaseline_algorithms/wfa", "-Lbaseline_algorithms/wfa/build", "src/cpu_baseline.cpp", "src/genasm_cpu.cpp", "src/util.cpp", "baseline_algorithms/ksw2/ksw2_extz.c", "baseline_algorithms/ksw2/ksw2_extz2_sse.c", "baseline_algorithms/edlib/edlib.cpp", "baseline_algorithms/gact/gact.cpp", "-std=c++17", "-O3", "-lpthread", "-lstdc++fs", "-lwfa", "-fopenmp"]
     compile_config = ["-DCLI_KNOBS", f"-DCLI_W={W}", f"-DCLI_K={W}", f"-DCLI_O={O}"]
     if sene: compile_config += ["-DCLI_STORE_ENTRIES_NOT_EDGES"]
     if dent: compile_config += ["-DCLI_DISCARD_ENTRIES_NOT_USED_BY_TRACEBACK"]
@@ -61,7 +62,7 @@ def run_cpu(W, O, sene, dent, early_termination, threads, reference, reads, seed
             aligns_per_sec = line.split(b" ")[1]
             res_data.append(params + [threads, float(aligns_per_sec.decode("ascii"))])
 
-def cpu_sweep_wo(reference, reads, seeds, outpath):
+def cpu_sweep_wo(reference, reads, seeds, outpath, repetitions):
     data = []
     threads = 48
 
@@ -75,11 +76,12 @@ def cpu_sweep_wo(reference, reads, seeds, outpath):
     for i, (W, sene, dent, early_termination) in enumerate(configs):
         print(f"[{datetime.now()}] cpu_sweep_wo {i}/{len(configs)}")
         O = min(W//2+1, W-1)
-        run_cpu(W, O, sene, dent, early_termination, threads, reference, reads, seeds, data)
+        for rep in range(repetitions):
+            run_cpu(W, O, sene, dent, early_termination, threads, reference, reads, seeds, data)
 
     csv_write(outpath, data, header=["W", "O", "SENE", "DENT", "early termination", "threads", "aligns/second"])
 
-def cpu_sweep_o(reference, reads, seeds, outpath):
+def cpu_sweep_o(reference, reads, seeds, outpath, repetitions):
     data = []
     threads = 48
 
@@ -94,11 +96,12 @@ def cpu_sweep_o(reference, reads, seeds, outpath):
 
     for i, (O, sene, dent, early_termination) in enumerate(configs):
         print(f"[{datetime.now()}] cpu_sweep_o {i}/{len(configs)}")
-        run_cpu(W, O, sene, dent, early_termination, threads, reference, reads, seeds, data)
+        for rep in range(repetitions):
+            run_cpu(W, O, sene, dent, early_termination, threads, reference, reads, seeds, data)
 
     csv_write(outpath, data, header=["W", "O", "SENE", "DENT", "early termination", "threads", "aligns/second"])
 
-def cpu_sweep_threads(reference, reads, seeds, outpath):
+def cpu_sweep_threads(reference, reads, seeds, outpath, repetitions):
     max_threads = 64
     granularity = max(1, max_threads//max_experiments)
     threads = list(range(granularity, max_threads+1, granularity))
@@ -113,15 +116,16 @@ def cpu_sweep_threads(reference, reads, seeds, outpath):
     data = []
     for i, (sene, dent, early_termination) in enumerate(configs):
         print(f"[{datetime.now()}] cpu_sweep_threads {i}/{len(configs)}")
-        run_cpu(W, O, sene, dent, early_termination, threads, reference, reads, seeds, data)
+        for rep in range(repetitions):
+            run_cpu(W, O, sene, dent, early_termination, threads, reference, reads, seeds, data)
 
     csv_write(outpath, data, header=["W", "O", "SENE", "DENT", "early termination", "threads", "aligns/second"])
 
-def profile_cpu(reference, reads, seeds, dataset_name):
+def profile_cpu(reference, reads, seeds, dataset_name, repetitions):
     override_name = f"_W={override_W}" if override_W else ""
-    cpu_sweep_wo(reference, reads, seeds, out_dir/f"{dataset_name}_cpu_sweep_WO.csv")
-    cpu_sweep_o(reference, reads, seeds, out_dir/f"{dataset_name}_cpu_sweep_O{override_name}.csv")
-    cpu_sweep_threads(reference, reads, seeds, out_dir/f"{dataset_name}_cpu_sweep_threads{override_name}.csv")
+    cpu_sweep_wo(reference, reads, seeds, out_dir/f"{dataset_name}_cpu_sweep_WO.csv", repetitions)
+    cpu_sweep_o(reference, reads, seeds, out_dir/f"{dataset_name}_cpu_sweep_O{override_name}.csv", repetitions)
+    cpu_sweep_threads(reference, reads, seeds, out_dir/f"{dataset_name}_cpu_sweep_threads{override_name}.csv", repetitions)
 
 def run_gpu(W, O, sene, dent, early_termination, tb_per_sm, cigar_sublist_size, dp_memory_type, smem_carveout_percent, arch, reference, reads, seeds, res_data):
     compile_base = ["nvcc", "-lineinfo", "-rdc=true", "src/bitvector_test.cu", "src/genasm_gpu.cu", "src/tests.cu", "src/util.cpp", "src/genasm_cpu.cpp", "-o", "tests", "-O3", "-std=c++17", "-lstdc++fs", "-Xcompiler", "-fopenmp"]
@@ -170,7 +174,7 @@ def run_gpu(W, O, sene, dent, early_termination, tb_per_sm, cigar_sublist_size, 
             aligns_per_sec = float(re.search(b"core algorithm ran at (\d+) ", line).group(1).decode("ascii"))
             res_data.append(params + [gpu, sm, smem, dp_memory_per_tb, aligns_per_sec])
 
-def gpu_sweep_wo(reference, reads, seeds, outpath, arch):
+def gpu_sweep_wo(reference, reads, seeds, outpath, arch, repetitions):
     data = []
 
     max_W = 256
@@ -187,10 +191,11 @@ def gpu_sweep_wo(reference, reads, seeds, outpath, arch):
         print(f"[{datetime.now()}] gpu_sweep_wo {i}/{len(configs)}")
         O = min(W//2+1, W-1)
         smem_carveout_percent = 100 if dp_mem=="shared" else 0
-        run_gpu(W, O, sene, dent, early_termination, tb_per_sm, cigar_sublist_size, dp_mem, smem_carveout_percent, arch, reference, reads, seeds, data)
+        for rep in range(repetitions):
+            run_gpu(W, O, sene, dent, early_termination, tb_per_sm, cigar_sublist_size, dp_mem, smem_carveout_percent, arch, reference, reads, seeds, data)
     csv_write(outpath, data, header=["W", "O", "sene", "dent", "early termination", "threadblocks/sm", "cigar sublist size", "dp memory type", "smem carveout percent", "arch", "gpu", "sm count", "available smem per sm (kiB)", "used smem per threadblock (B)", "throughput (aligns/s)"])
 
-def gpu_sweep_o(reference, reads, seeds, outpath, arch):
+def gpu_sweep_o(reference, reads, seeds, outpath, arch, repetitions):
     data = []
 
     W = 64
@@ -208,11 +213,12 @@ def gpu_sweep_o(reference, reads, seeds, outpath, arch):
     for i, (O, sene, dent, early_termination, dp_mem) in enumerate(configs):
         print(f"[{datetime.now()}] gpu_sweep_o {i}/{len(configs)}")
         smem_carveout_percent = 100 if dp_mem=="shared" else 0
-        run_gpu(W, O, sene, dent, early_termination, tb_per_sm, cigar_sublist_size, dp_mem, smem_carveout_percent, arch, reference, reads, seeds, data)
+        for rep in range(repetitions):
+            run_gpu(W, O, sene, dent, early_termination, tb_per_sm, cigar_sublist_size, dp_mem, smem_carveout_percent, arch, reference, reads, seeds, data)
 
     csv_write(outpath, data, header=["W", "O", "sene", "dent", "early termination", "threadblocks/sm", "cigar sublist size", "dp memory type", "smem carveout percent", "arch", "gpu", "sm count", "available smem per sm (kiB)", "used smem per threadblock (B)", "throughput (aligns/s)"])
 
-def gpu_sweep_threadblocks(reference, reads, seeds, outpath, arch):
+def gpu_sweep_threadblocks(reference, reads, seeds, outpath, arch, repetitions):
     data = []
 
     W = 64
@@ -231,14 +237,15 @@ def gpu_sweep_threadblocks(reference, reads, seeds, outpath, arch):
     for i, (tb_per_sm, sene, dent, early_termination, dp_mem) in enumerate(configs):
         print(f"[{datetime.now()}] gpu_sweep_threadblocks {i}/{len(configs)}")
         smem_carveout_percent = 100 if dp_mem=="shared" else 0
-        run_gpu(W, O, sene, dent, early_termination, tb_per_sm, cigar_sublist_size, dp_mem, smem_carveout_percent, arch, reference, reads, seeds, data)
+        for rep in range(repetitions):
+            run_gpu(W, O, sene, dent, early_termination, tb_per_sm, cigar_sublist_size, dp_mem, smem_carveout_percent, arch, reference, reads, seeds, data)
     csv_write(outpath, data, header=["W", "O", "sene", "dent", "early termination", "threadblocks/sm", "cigar sublist size", "dp memory type", "smem carveout percent", "arch", "gpu", "sm count", "available smem per sm (kiB)", "used smem per threadblock (B)", "throughput (aligns/s)"])
 
-def profile_gpu(reference, reads, seeds, dataset_name, arch):
+def profile_gpu(reference, reads, seeds, dataset_name, arch, repetitions):
     override_name = f"_W={override_W}" if override_W else ""
-    gpu_sweep_wo(reference, reads, seeds, out_dir/f"{dataset_name}_gpu_sweep_WO.csv", arch)
-    gpu_sweep_o(reference, reads, seeds, out_dir/f"{dataset_name}_gpu_sweep_O{override_name}.csv", arch)
-    gpu_sweep_threadblocks(reference, reads, seeds, out_dir/f"{dataset_name}_gpu_sweep_threadblocks{override_name}.csv", arch)
+    gpu_sweep_threadblocks(reference, reads, seeds, out_dir/f"{dataset_name}_gpu_sweep_threadblocks{override_name}.csv", arch, repetitions)
+    gpu_sweep_wo(reference, reads, seeds, out_dir/f"{dataset_name}_gpu_sweep_WO.csv", arch, repetitions)
+    gpu_sweep_o(reference, reads, seeds, out_dir/f"{dataset_name}_gpu_sweep_O{override_name}.csv", arch, repetitions)
 
 def run_cpu_baselines(threads, algorithms, reference, reads, seeds, res_data):
     if type(threads) == list:
@@ -252,7 +259,7 @@ def run_cpu_baselines(threads, algorithms, reference, reads, seeds, res_data):
     subprocess.run(["mkdir", "-p", "baseline_algorithms/wfa/build"])
     subprocess.run(["make", "-C", "baseline_algorithms/wfa/", "lib_wfa"], capture_output=True)
 
-    compile_base = ["g++", "-o", "cpu_baseline", "-DLIB_WFA", "-Ibaseline_algorithms/wfa", "-Lbaseline_algorithms/wfa/build", "src/cpu_baseline.cpp", "src/genasm_cpu.cpp", "baseline_algorithms/ksw2/ksw2_extz.c", "baseline_algorithms/ksw2/ksw2_extz2_sse.c", "baseline_algorithms/edlib/edlib.cpp", "src/util.cpp", "-std=c++17", "-O3", "-lpthread", "-lstdc++fs", "-lwfa", "-fopenmp"]
+    compile_base = ["g++", "-o", "cpu_baseline", "-DLIB_WFA", "-Ibaseline_algorithms/wfa", "-Lbaseline_algorithms/wfa/build", "src/cpu_baseline.cpp", "src/genasm_cpu.cpp", "baseline_algorithms/ksw2/ksw2_extz.c", "baseline_algorithms/ksw2/ksw2_extz2_sse.c", "baseline_algorithms/edlib/edlib.cpp", "baseline_algorithms/gact/gact.cpp", "src/util.cpp", "-std=c++17", "-O3", "-lpthread", "-lstdc++fs", "-lwfa", "-fopenmp"]
     compile_config = []
 
     compile_res = subprocess.run(compile_base + compile_config, capture_output=True)
@@ -289,7 +296,7 @@ def run_cpu_baselines(threads, algorithms, reference, reads, seeds, res_data):
             aligns_per_sec = match.group(2)
             res_data.append([algorithm.decode("ascii"), threads, float(aligns_per_sec.decode("ascii"))])
 
-def cpu_baselines_sweep_threads(algorithms, reference, reads, seeds, outpath):
+def cpu_baselines_sweep_threads(algorithms, reference, reads, seeds, outpath, repetitions):
     max_threads = 64
     granularity = max(1, max_threads//max_experiments)
     threads = list(range(granularity, max_threads+1, granularity))
@@ -298,11 +305,12 @@ def cpu_baselines_sweep_threads(algorithms, reference, reads, seeds, outpath):
     data = []
     for i, algorithm in enumerate(configs):
         print(f"[{datetime.now()}] baselines_sweep_threads {i}/{len(configs)}")
-        run_cpu_baselines(threads, algorithm, reference, reads, seeds, data)
+        for rep in range(repetitions):
+            run_cpu_baselines(threads, algorithm, reference, reads, seeds, data)
     csv_write(outpath, data, header=["algorithm", "threads", "aligns/second"])
 
-def profile_cpu_baselines(algorithms, reference, reads, seeds, dataset_name):
-    cpu_baselines_sweep_threads(algorithms, reference, reads, seeds, out_dir/f"{dataset_name}_baselines_sweep_threads.csv")
+def profile_cpu_baselines(algorithms, reference, reads, seeds, dataset_name, repetitions):
+    cpu_baselines_sweep_threads(algorithms, reference, reads, seeds, out_dir/f"{dataset_name}_baselines_sweep_threads.csv", repetitions)
 
 def run_darwin_gpu(cpu_threads, thread_blocks, threads_per_block, arch, reference, reads, seeds, tmp_dir, res_data):
     #prepare data
@@ -353,7 +361,7 @@ def run_darwin_gpu(cpu_threads, thread_blocks, threads_per_block, arch, referenc
     #last alignments/second print contains the correct throughput when the last thread terminates
     res_data.append(["darwin_gpu", cpu_threads, thread_blocks, threads_per_block, arch, float(aligns_per_sec.decode("ascii"))])
 
-def sweep_darwin_gpu(reference, reads, seeds, outpath, arch, tmp_dir):
+def sweep_darwin_gpu(reference, reads, seeds, outpath, arch, tmp_dir, repetitions):
     data = []
 
     cpu_threadss = list(range(1, 17))
@@ -363,7 +371,8 @@ def sweep_darwin_gpu(reference, reads, seeds, outpath, arch, tmp_dir):
 
     for i, (cpu_threads, threadblocks, threads_per_block) in enumerate(configs):
         print(f"[{datetime.now()}] sweep_darwin_gpu {i}/{len(configs)}")
-        run_darwin_gpu(cpu_threads, threadblocks, threads_per_block, arch, reference, reads, seeds, tmp_dir, data)
+        for rep in range(repetitions):
+            run_darwin_gpu(cpu_threads, threadblocks, threads_per_block, arch, reference, reads, seeds, tmp_dir, data)
 
     csv_write(outpath, data, header=["algorithm", "threads", "thread_blocks", "threads_per_block", "arch", "aligns/second"])
 
@@ -424,12 +433,15 @@ def run_cudaswpp3(sequence_length_limit, arch, reference, reads, seeds, tmp_dir,
 
     res_data.append(["cudasw++3.0", arch, avg_read_length, avg_gcups, avg_alignments_per_second])
 
-def profile_gpu_baselines(reference, reads, seeds, dataset_name, arch, tmp_dir):
-    sweep_darwin_gpu(reference, reads, seeds, out_dir/f"{dataset_name}_darwin_gpu_sweep.csv", arch, tmp_dir)
-
+def sweep_cudaswpp3(reference, reads, seeds, outpath, sequence_length_limit, arch, tmp_dir, repetitions):
     cudaswpp_data = []
-    run_cudaswpp3(20000, arch, reference, reads, seeds, tmp_dir, cudaswpp_data)
-    csv_write(out_dir/f"{dataset_name}_cudaswpp.csv", cudaswpp_data, header=["algorithm", "arch", "avg_read_length", "avg_gcups", "aligns/second"])
+    for rep in range(repetitions):
+        run_cudaswpp3(sequence_length_limit, arch, reference, reads, seeds, tmp_dir, cudaswpp_data)
+    csv_write(outpath, cudaswpp_data, header=["algorithm", "arch", "avg_read_length", "avg_gcups", "aligns/second"])
+
+def profile_gpu_baselines(reference, reads, seeds, dataset_name, arch, tmp_dir, repetitions):
+    sweep_darwin_gpu(reference, reads, seeds, out_dir/f"{dataset_name}_darwin_gpu_sweep.csv", arch, tmp_dir, repetitions)
+    sweep_cudaswpp3(reference, reads, seeds, out_dir/f"{dataset_name}_cudaswpp.csv", 20000, arch, tmp_dir, repetitions)
 
 def run_accuracy(threads, algorithms, scoring, reference, reads, seeds, cigar, res_data):
     if type(threads) == list:
@@ -446,7 +458,7 @@ def run_accuracy(threads, algorithms, scoring, reference, reads, seeds, cigar, r
     subprocess.run(["mkdir", "-p", "baseline_algorithms/wfa/build"])
     subprocess.run(["make", "-C", "baseline_algorithms/wfa/", "lib_wfa"], capture_output=True)
 
-    compile_base = ["g++", "-o", "cpu_baseline", "-DLIB_WFA", "-Ibaseline_algorithms/wfa", "-Lbaseline_algorithms/wfa/build", "src/cpu_baseline.cpp", "src/genasm_cpu.cpp", "baseline_algorithms/ksw2/ksw2_extz.c", "baseline_algorithms/ksw2/ksw2_extz2_sse.c", "baseline_algorithms/edlib/edlib.cpp", "src/util.cpp", "-std=c++17", "-O3", "-lpthread", "-lstdc++fs", "-lwfa", "-fopenmp"]
+    compile_base = ["g++", "-o", "cpu_baseline", "-DLIB_WFA", "-Ibaseline_algorithms/wfa", "-Lbaseline_algorithms/wfa/build", "src/cpu_baseline.cpp", "src/genasm_cpu.cpp", "baseline_algorithms/ksw2/ksw2_extz.c", "baseline_algorithms/ksw2/ksw2_extz2_sse.c", "baseline_algorithms/edlib/edlib.cpp", "baseline_algorithms/gact/gact.cpp", "src/util.cpp", "-std=c++17", "-O3", "-lpthread", "-lstdc++fs", "-lwfa", "-fopenmp"]
     compile_config = []
 
     compile_res = subprocess.run(compile_base + compile_config, capture_output=True)
@@ -526,7 +538,7 @@ def run_accuracy_cpu(scoring, W, O, threads, reference, reads, seeds, cigar, res
     subprocess.run(["mkdir", "-p", "baseline_algorithms/wfa/build"])
     subprocess.run(["make", "-C", "baseline_algorithms/wfa/", "lib_wfa"], capture_output=True)
 
-    compile_base = ["g++", "-o", "cpu_baseline", "-DLIB_WFA", "-Ibaseline_algorithms/wfa", "-Lbaseline_algorithms/wfa/build", "src/cpu_baseline.cpp", "src/genasm_cpu.cpp", "baseline_algorithms/ksw2/ksw2_extz.c", "baseline_algorithms/ksw2/ksw2_extz2_sse.c", "baseline_algorithms/edlib/edlib.cpp", "src/util.cpp", "-std=c++17", "-O3", "-lpthread", "-lstdc++fs", "-lwfa", "-fopenmp"]
+    compile_base = ["g++", "-o", "cpu_baseline", "-DLIB_WFA", "-Ibaseline_algorithms/wfa", "-Lbaseline_algorithms/wfa/build", "src/cpu_baseline.cpp", "src/genasm_cpu.cpp", "baseline_algorithms/ksw2/ksw2_extz.c", "baseline_algorithms/ksw2/ksw2_extz2_sse.c", "baseline_algorithms/edlib/edlib.cpp", "baseline_algorithms/gact/gact.cpp", "src/util.cpp", "-std=c++17", "-O3", "-lpthread", "-lstdc++fs", "-lwfa", "-fopenmp"]
     compile_config = ["-DCLI_KNOBS", f"-DCLI_W={W}", f"-DCLI_K={W}", f"-DCLI_O={O}"]
     compile_config += ["-DCLI_STORE_ENTRIES_NOT_EDGES"]
     compile_config += ["-DCLI_DISCARD_ENTRIES_NOT_USED_BY_TRACEBACK"]
@@ -628,8 +640,9 @@ def cpu_accuracy_sweep_o(reference, reads, seeds, cigar, outpath):
 def profile_accuracy_cpu(algorithms, reference, reads, seeds, dataset_name, cigar=False):
     cigar_filename_str = "_cigar" if cigar else ""
     all_accuracy(algorithms, reference, reads, seeds, cigar, out_dir/f"{dataset_name}_all_accuracy{cigar_filename_str}.csv")
-    cpu_accuracy_sweep_wo(reference, reads, seeds, cigar, out_dir/f"{dataset_name}_cpu_accuracy_sweep_wo{cigar_filename_str}.csv")
-    cpu_accuracy_sweep_o(reference, reads, seeds, cigar, out_dir/f"{dataset_name}_cpu_accuracy_sweep_o{cigar_filename_str}.csv")
+    if 'genasm_cpu' in algorithms:
+        cpu_accuracy_sweep_wo(reference, reads, seeds, cigar, out_dir/f"{dataset_name}_cpu_accuracy_sweep_wo{cigar_filename_str}.csv")
+        cpu_accuracy_sweep_o(reference, reads, seeds, cigar, out_dir/f"{dataset_name}_cpu_accuracy_sweep_o{cigar_filename_str}.csv")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Profile gpu/cpu implementation or cpu baselines")
@@ -637,12 +650,13 @@ if __name__ == "__main__":
     parser.add_argument("dataset", type=str, help="Name of a subdirectory of datasets_dir. Must contain reference.fasta, reads.fastq and candidates.[paf,maf]")
     parser.add_argument("--arch", type=str, help="gpu architecture, e.g. sm_70, mandatory when 'gpu' is specified")
     parser.add_argument("--tmp_dir", type=str, help="directory to temporarily store inputs for baseline algorithms that require custom input formats, e.g. darwin_gpu")
-    cpu_algs = ["edlib", "ksw2_extz", "ksw2_extz2_sse", "genasm_cpu", "wfa_lm", "wfa_adaptive", "wfa_exact"]
+    cpu_algs = ["edlib", "ksw2_extz", "ksw2_extz2_sse", "genasm_cpu", "wfa_lm", "wfa_adaptive", "wfa_exact", "custom_gact"]
     parser.add_argument("--algorithms", type=str, nargs='+', choices=cpu_algs, default=cpu_algs, help="cpu baseline algorithms to run (required if target is 'cpu_baselines')")
     parser.add_argument("--cigar", action="store_true", help="get cigar strings in accuracy measurement")
     parser.add_argument("--override_W", type=int, default=None)
     parser.add_argument("--datasets_dir", type=Path, default=Path("datasets"))
     parser.add_argument("--profile_dir", type=Path, default=Path("profile"))
+    parser.add_argument("--repetitions", type=int, default=1)
     args = parser.parse_args()
 
     dataset_dirs = [d for d in args.datasets_dir.iterdir() if d.is_dir()] if args.datasets_dir.is_dir() else []
@@ -680,20 +694,23 @@ if __name__ == "__main__":
         print(f"could not find 'candidates.[maf,paf]' in dataset '{args.dataset}'")
         exit(1)
 
+    print('server:', platform.node())
+    print('cpu:', platform.processor())
+
     out_dir = args.profile_dir
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    max_experiments = 32
+    max_experiments = 16
     override_W = args.override_W
 
     if args.target=="cpu":
-        profile_cpu(reference_path, reads_path, candidates_path, args.dataset)
+        profile_cpu(reference_path, reads_path, candidates_path, args.dataset, args.repetitions)
     if args.target=="gpu":
-        profile_gpu(reference_path, reads_path, candidates_path, args.dataset, args.arch)
+        profile_gpu(reference_path, reads_path, candidates_path, args.dataset, args.arch, args.repetitions)
     if args.target=="cpu_baselines":
-        profile_cpu_baselines(args.algorithms, reference_path, reads_path, candidates_path, args.dataset)
+        profile_cpu_baselines(args.algorithms, reference_path, reads_path, candidates_path, args.dataset, args.repetitions)
     if args.target=="gpu_baselines":
         assert(args.tmp_dir != None)
-        profile_gpu_baselines(reference_path, reads_path, candidates_path, args.dataset, args.arch, args.tmp_dir)
+        profile_gpu_baselines(reference_path, reads_path, candidates_path, args.dataset, args.arch, args.tmp_dir, args.repetitions)
     if args.target=="accuracy_cpu":
         profile_accuracy_cpu(args.algorithms, reference_path, reads_path, candidates_path, args.dataset, cigar=args.cigar)

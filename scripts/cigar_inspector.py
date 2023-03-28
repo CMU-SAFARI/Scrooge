@@ -70,21 +70,53 @@ def plot_cigar_matches(ax, cigar, **plot_config):
     xs, ys = transpose(flattened_matches)
     ax.plot(xs, ys, **plot_config)
 
-def cigar_inspector(read, reference, algorithms):
-    fig, ax = plt.subplots(1,1, figsize=(0.5, 0.5))
+def plot_genasm_windows(ax:plt.Axes, read, reference, cigar, colors, W, O):
+    alignment_path = cigar_to_coords(cigar)
+    window_starts = [(0, 0)]
+    for i, j in alignment_path:
+        if i > window_starts[-1][0] + W-O or \
+        j > window_starts[-1][1] + W-O:
+            window_starts.append((i, j))
+
+    for i, window_start in enumerate(window_starts):
+        window_end = (
+            min(window_start[0] + W, len(read)),
+            min(window_start[1] + W, len(reference))
+        )
+        window_polygon = [
+            window_start,
+            (window_start[0], window_end[1]),
+            window_end,
+            (window_end[0], window_start[1]),
+            window_start
+        ]
+        xs, ys = zip(*window_polygon)
+        ax.plot(xs, ys, color=colors[i%len(colors)])
+
+def cigar_inspector(read, reference, algorithms, W=None, O=None):
+    fig, ax = plt.subplots(1,1, figsize=(8, 8))
 
     for name, cigar, color in algorithms:
         plot_cigar(ax, cigar, label=f"{name} edits", color=color, linestyle='--', linewidth=0.5)
         plot_cigar_matches(ax, cigar, label=f"{name} matches", color=color, linestyle='-', linewidth=1)
-    
+        print(name)
+        if name==f'Scrooge W={W}' and W is not None and O is not None:
+            window_colors = [
+                (1.0, 0.0, 0.0),
+                (0.6, 0.0, 0.0),
+                (0.3, 0.0, 0.0),
+            ]
+            plot_genasm_windows(ax, read, reference, cigar, window_colors, W, O)
+
     ax.invert_yaxis()
     ax.autoscale(enable=True, axis="both", tight=True)
     ax.grid(True)
-    fig.legend()
-    ax.set_xlabel("Read")
-    ax.set_ylabel("Reference")
+    fig.legend(bbox_to_anchor=[0.5, 1.0], loc='upper center', ncols=3)
+    ax.set_xlabel("Read", weight='bold')
+    ax.set_ylabel("Reference", weight='bold')
     ax.xaxis.set_label_position('top')
     ax.xaxis.tick_top()
+    ax.set_box_aspect(1)
 
     def on_lims_change(event_ax):
         x_a, x_b = sorted(event_ax.get_xlim())
@@ -111,15 +143,28 @@ def cigar_inspector(read, reference, algorithms):
 
     fig.show()
 
-def plot_worst_alignment_path(file_path, worst_idx):
+def plot_worst_alignment_path(file_path, worst_idx, W=None, O=None, WO_sweep_path=None):
     print("loading df")
     data = pandas.read_csv(file_path,
         usecols=['algorithm', 'pair_idx', 'score', 'cigar', 'read', 'reference'],
         dtype={'pair_idx' : int, 'score' : 'Int64'})
     print("done")
 
-    algorithms = data['algorithm'].unique()
+    algorithms = list(data['algorithm'].unique())
     reshaped_subdatas = [subdata.drop(columns='algorithm').rename(columns={'score':alg,'cigar':f'{alg}_cigar'}) for (alg, subdata) in data.groupby(['algorithm'])]
+
+    if WO_sweep_path:
+        print("loading df")
+        data = pandas.read_csv(WO_sweep_path,
+            usecols=['W', 'pair_idx', 'score', 'cigar', 'read', 'reference'],
+            dtype={'pair_idx' : int, 'score' : 'Int64'})
+        print("done")
+
+        reshaped_subdatas += [subdata.drop(columns='W').rename(columns={'score':f'Scrooge W={int(W)}','cigar':f'Scrooge W={int(W)}_cigar'}) for (W, subdata) in data.groupby(['W'])]
+        print(algorithms)
+        Ws = [int(W) for W in data['W'].unique() if W <= 32]
+        algorithms += [f'Scrooge W={W}' for W in Ws]
+
     joined = reshaped_subdatas[0]
     for subdata in reshaped_subdatas[1:]:
         joined = joined.merge(subdata, on='pair_idx', how='outer')
@@ -129,23 +174,40 @@ def plot_worst_alignment_path(file_path, worst_idx):
     for algorithm in algorithms:
         data[f'{algorithm}_normalized'] = data[algorithm]/data['edlib']
 
-    data.sort_values(by=['genasm_cpu_normalized'], inplace=True)
+#    data.sort_values(by=['genasm_cpu_normalized'], inplace=True)
+    data.sort_values(by=['Scrooge W=16'], inplace=True)
 
     alg_colors = {
-        'edlib': (0.0,0.5,0.0),
+        'edlib': (1.0,0.0,0.0),
         'genasm_cpu': (0.0,1.0,0.0),
-        'ksw2_extz2_sse': (0.0,0.0,0.0)
+        'ksw2_extz2_sse': (0.0,0.0,0.0),
+        'Scrooge W=16': (0.0,0.5,0.0),
+        'Scrooge W=32': (0.0,1.0,0.0)
     }
 
+    renaming = {
+        'edlib': 'Edlib'
+    }
+
+    algorithms.remove('genasm_cpu')
+    algorithms.remove('ksw2_extz2_sse')
+
     pair = data.iloc[worst_idx]
-    algs = [(alg_name, pair[f'{alg_name}_cigar'], alg_colors[alg_name]) for alg_name in algorithms]
-    cigar_inspector(pair['read'], pair['reference'], algs)
+    #print(pair['pair_idx'])
+    #print(pair['read'])
+    #print(pair['reference'])
+
+    algs = [(renaming.get(alg_name, alg_name), pair[f'{alg_name}_cigar'], alg_colors.get(alg_name, (0.0,0.0,0.0))) for alg_name in algorithms]
+    cigar_inspector(pair['read'], pair['reference'], algs, W, O)
     plt.show()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('cigar_file_path', type=Path, help='path to *_accuracy_cigar.csv file produced with profile.py')
     parser.add_argument('worst_idx', type=int, help='idx-th worst alignment to plot')
+    parser.add_argument('--W', type=int, help='plot GenASM\'s windows with the given W')
+    parser.add_argument('--O', type=int, help='plot GenASM\'s windows with the given O')
+    parser.add_argument('--WO_sweep_path', type=Path, help='path to *_accuracy_cigar.csv file produced with profile.py')
     args = parser.parse_args()
 
-    plot_worst_alignment_path(args.cigar_file_path, args.worst_idx)
+    plot_worst_alignment_path(args.cigar_file_path, args.worst_idx, args.W, args.O, args.WO_sweep_path)
