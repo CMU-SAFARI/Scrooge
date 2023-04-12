@@ -1,8 +1,37 @@
 # **Scrooge:** A fast and memory-frugal genomic sequence aligner for CPUs, GPUs and ASICs
 
-_Scrooge_ is a fast pairwise genomic sequence aligner. It efficiently aligns short and long genomic sequence pairs on multiple computing platforms. It is based on the GenASM algorithm ([Senol Cali+, 2020](https://arxiv.org/abs/2009.07692)), and adds multiple algorithmic improvements that significantly improve the throughput and resource efficiency for CPUs, GPUs and ASICs. For long reads and the CPU version of Scrooge we observe a 15x and 1.7x speedup over KSW2 and Edlib, respectively. For long reads and the GPU version of Scrooge we observe a 63x and 7.4x speedup over KSW2 and Edlib, respectively.
+_Scrooge_ is a fast pairwise genomic sequence aligner. It efficiently aligns short and long genomic sequence pairs on multiple computing platforms. It is based on the GenASM algorithm ([Senol Cali+, 2020](https://arxiv.org/abs/2009.07692)), and adds multiple algorithmic improvements that significantly improve the throughput and resource efficiency for CPUs, GPUs and ASICs. For long reads, the CPU version of Scrooge achieves a 20.1x, 1.7x, and 2.1x speedup over KSW2, Edlib, and a CPU implementation of GenASM, respectively. The GPU version of Scrooge achieves a 4.0x 80.4x, 6.8x, 12.6x and 5.9x speedup over the CPU version of Scrooge, KSW2, Edlib, Darwin-GPU, and a GPU implementation of GenASM, respectively. We estimate an ASIC implementation of Scrooge to use 3.6x less chip area and 2.1x less power than a GenASM ASIC while maintaining the same throughput.
 
-This repository contains Scrooge's CPU and GPU implementations, and several evaluation scripts. We describe Scrooge in our [paper on arXiv](https://doi.org/10.48550/arXiv.2208.09985).
+This repository contains Scrooge's CPU and GPU implementations, and several evaluation scripts. We describe Scrooge in our paper [on arXiv](https://doi.org/10.48550/arXiv.2208.09985) and [in Bioinformatics](https://doi.org/10.1093/bioinformatics/btad151).
+
+## **Citing Scrooge**
+
+If you use Scrooge in your work, please cite:
+
+> Joël Lindegger, Damla Senol Cali, Mohammed Alser, Juan Gómez-Luna, Nika Mansouri Ghiasi, and Onur Mutlu.
+> ["Scrooge: A Fast and Memory-Frugal Genomic Sequence Aligner for CPUs, GPUs and ASICs."](https://doi.org/10.1093/bioinformatics/btad151)
+> Bioinformatics (2023).
+
+> Joël Lindegger, Damla Senol Cali, Mohammed Alser, Juan Gómez-Luna, and Onur Mutlu. 
+> ["Algorithmic Improvement and GPU Acceleration of the GenASM Algorithm."](https://arxiv.org/abs/2203.15561) 
+> HiCOMB (2022).
+
+Below are the citations in bibtex format.
+
+```bibtex
+@article{lindegger2023scrooge,
+  title={{Scrooge: A Fast and Memory-Frugal Genomic Sequence Aligner for CPUs, GPUs, and ASICs}},
+  author={Lindegger, Jo{\"e}l and Senol Cali, Damla and Alser, Mohammed and G{\'o}mez-Luna, Juan and Mansouri Ghiasi, Nika and Mutlu, Onur},
+  journal={Bioinformatics},
+  year={2023}
+}
+@article{lindegger2022algorithmic,
+  title={{Algorithmic Improvement and GPU Acceleration of the GenASM Algorithm}},
+  author={Lindegger, Jo{\"e}l and Senol Cali, Damla and Alser, Mohammed and G{\'o}mez-Luna, Juan and Mutlu, Onur},
+  journal={HiCOMB},
+  year={2022}
+}
+```
 
 ## **Repository Structure**
 
@@ -159,35 +188,6 @@ The above command starts the CIGAR inspector with the sequence pair for which Sc
 ## **Getting Help**
 
 If you have any suggestion for improvement, please contact jmlindegger at gmail dot com. If you encounter bugs or have further questions or requests, you can raise an issue at the [issue page](https://github.com/CMU-SAFARI/Scrooge/issues).
-
-## **Citing Scrooge**
-
-If you use Scrooge in your work, please cite:
-
-> Joël Lindegger, Damla Senol Cali, Mohammed Alser, Juan Gómez-Luna, Nika Mansouri Ghiasi, and Onur Mutlu.
-> ["Scrooge: A Fast and Memory-Frugal Genomic Sequence Aligner for CPUs, GPUs and ASICs."](https://doi.org/10.48550/arXiv.2208.09985)
-> arXiv (2022).
-
-> Joël Lindegger, Damla Senol Cali, Mohammed Alser, Juan Gómez-Luna, and Onur Mutlu. 
-> ["Algorithmic Improvement and GPU Acceleration of the GenASM Algorithm."](https://arxiv.org/abs/2203.15561) 
-> HiCOMB (2022).
-
-Below is bibtex format for citation.
-
-```bibtex
-@article{lindegger2022scrooge,
-  title={{Scrooge: A Fast and Memory-Frugal Genomic Sequence Aligner for CPUs, GPUs, and ASICs}},
-  author={Lindegger, Jo{\"e}l and Senol Cali, Damla and Alser, Mohammed and G{\'o}mez-Luna, Juan and Mansouri Ghiasi, Nika and Mutlu, Onur},
-  journal={arXiv},
-  year={2022}
-}
-@article{lindegger2022algorithmic,
-  title={{Algorithmic Improvement and GPU Acceleration of the GenASM Algorithm}},
-  author={Lindegger, Jo{\"e}l and Senol Cali, Damla and Alser, Mohammed and G{\'o}mez-Luna, Juan and Mutlu, Onur},
-  journal={HiCOMB},
-  year={2022}
-}
-```
 
 ## **Limitations**
 
