@@ -224,7 +224,7 @@ void gpu_algorithm_correctness_test(){
 void cpu_algorithm_correctness_test(){
     Genome_t reference;
     reference.content = "AAAACCCCGGGGTTTT";
-    
+
     CandidateLocation_t ref_begin;
     ref_begin.start_in_reference = 0;
     ref_begin.start_in_chromosome = 0;
@@ -268,6 +268,68 @@ void cpu_algorithm_correctness_test(){
     if(success){
         cout << "PASSED cpu_algorithm_correctness_test" << endl;
     }
+}
+
+void library_interface_correctness_test(){
+    //assert that all interfaces produce the same results
+    vector<pair<string, string>> pairs = {
+        {"ACGT", "ACGT"},
+        {"CAAATCTATTAAGTCAAACGGTCCGTAAGCTAGAACCTCCTGCCGTGTAAGTTACGACGTGGTCGAGTTACTTTCGTTCTTATTAACACAATGTCCATCA", "CAAACCTATCAAGTCAAACGGTCCGTAGCTACACCTCCTGCCGTGTAAAGTTACGACGTGGTTGAGTTACTTTCGTTCTTATTAACAACAATGTTCCATCA" },
+        {"CGGCGAAGGAATTAATTACAAGCCTTGTACACTTGCATATTCTTCTGCAACAGGGCCCCGGCTCCGTCCTACCTCGGTTTACTGTGACTCACTTGAGCGA", "CGGCGAAGGAATAATTACAAGCCTGTATCACTTGCATATTCGTTCTGCAACAGGCCCGGCTCCGTCTACGCTGGTTTACTGTGACTCACTTGAGCGA" },
+        {"ACAGTGGAAATGTCGCGGAAGGGTAGCAGTAGAACTTAATCAGAGAGATTACCTCGCGTAGTTGAAGTCTTGACGGGCGCATTGGACATAACAAACATAC", "ACGTGGACATGTCGCGGAAGGATAGCAGTAGAACTTAATCAGAGAATTACCTCGCGTAGTTGAACTCTTGACGGCGCGATGTGGACCTAACAAACATAC" },
+        {"AACCCACGGTCTTCTCTGGTTTCGAACTTACAATCGTGAGCCCATCCGTACTTTCATGTTTCTTAAGATGGCAAGACAGAAATATAATTAGGCCGGGAGC", "AACCCACGGTCTTCTCTGGTTTCGAATTAGCAATCGTCGAGCCGCATCCGTACTTTCATGTTTCCTTAAGATGGCCAGAACAGAAATAATTAGGCCGGGAGC" },
+        {"TTTGCTTAGCCGAGCTATGCGGAACTAGAGCACCGGAGGTTTGTGTGGTCACTAGAATGACAAGGTCTCTGATCAGATATAACTCTTCGGGTTTGCGTAA", "TTTGCTTAGCCGAGCTATCCCGGAACAGACACCGGAGGTTTGAGTGGTCACTAGAATGACAAGGTATCTGATCAGATACAACTTCTTCGGGCTTTGCGTAA" },
+        {"GATGTACAGTCTCGAAAACCAAGTCTAGGACCAATTCCAACCTTATAATCCAGATTTACCATTATGACAACCGCAGAAGAGAAACTAATCGTCCAAAAGA", "GATGTGCAGTCTCGAAAACCAAGTCTAGGACCAGATTCCAACCTTTTAACCCAGAGTTACCAGAGACAACCGCAGAAGAGAAACTAATCGTCCAAAAGA" },
+        {"TCCTGCGCGCGAAGGGGACATTGCAGGGCAAAGCAATGGCTAGATAGCCTCATACTGAGACGATAAATGGCGTTGGACACCGGAGAAAAGACCCCGCCGA", "TCTGCGCGCGAAGGGGACATAGCAGGCAAAGCAATGGCTAGATAGCCTCATACTGAGAGATAAATGGCGTTGGCCACCGGAGCAAAAGACCCCGCCG" }
+    };
+
+    for(pair<string, string> pair : pairs){
+        string &query = pair.first;
+        string &text = pair.second;
+
+        Genome_t reference;
+        reference.content = text;
+        
+        CandidateLocation_t ref_begin;
+        ref_begin.start_in_reference = 0;
+        ref_begin.start_in_chromosome = 0;
+        ref_begin.strand = true;
+        ref_begin.chromosome = "";
+        vector<CandidateLocation_t> ref_begin_vec(1, ref_begin);
+
+        vector<Read_t> reads(1, {"test", query,         ref_begin_vec});
+
+        vector<string> queries(1, query);
+        vector<string> texts(1, text);
+
+        vector<Alignment_t> cpu_pairwise_interface_alignments = genasm_cpu::align_all(texts, queries, 1);
+        vector<Alignment_t> cpu_mapping_interface_alignments = genasm_cpu::align_all(reference, reads, 1);
+        vector<Alignment_t> gpu_pairwise_interface_alignments = genasm_gpu::align_all(texts, queries);
+        vector<Alignment_t> gpu_mapping_interface_alignments = genasm_gpu::align_all(reference, reads);
+
+        bool edits_match = 
+            cpu_pairwise_interface_alignments[0].cigar == cpu_mapping_interface_alignments[0].cigar &&
+            cpu_pairwise_interface_alignments[0].cigar == gpu_pairwise_interface_alignments[0].cigar &&
+            cpu_pairwise_interface_alignments[0].cigar == gpu_mapping_interface_alignments[0].cigar;
+
+        if(!edits_match){
+            cout << "FAILED library_interface_correctness_test: align_all() produced different edit distances" << endl;
+            return;
+        }
+
+        bool cigars_match = 
+            cpu_pairwise_interface_alignments[0].cigar == cpu_mapping_interface_alignments[0].cigar &&
+            cpu_pairwise_interface_alignments[0].cigar == gpu_pairwise_interface_alignments[0].cigar &&
+            cpu_pairwise_interface_alignments[0].cigar == gpu_mapping_interface_alignments[0].cigar;
+
+        if(!cigars_match){
+            cout << "FAILED library_interface_correctness_test: align_all() produced different CIGAR strings" << endl;
+            return;
+        }
+    }
+
+    cout << "PASSED library_interface_correctness_test" << endl;
+
 }
 
 void gpu_algorithm_performance_test(string reference_file_path, string reads_file_path, string alignments_file_path, int read_length_cap=-1, int dataset_inflation=1){
@@ -738,6 +800,7 @@ int main(int argc, char **argv){
         //ascii_to_two_bit_performance_test(reads_file);
         cpu_algorithm_correctness_test();
         gpu_algorithm_correctness_test();
+        library_interface_correctness_test();
     }
     else{
         if(cpu_performance_test){

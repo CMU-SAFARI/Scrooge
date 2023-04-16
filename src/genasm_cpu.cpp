@@ -572,7 +572,7 @@ namespace genasm_cpu {
             zb_queries.push_back({query_base, query_len});
             
             char* text_base = ascii_to_zero_based_string(texts[i]);
-            size_t text_len = queries[i].size();
+            size_t text_len = texts[i].size();
             zb_texts.push_back({text_base, text_len});
 
             char *cigar = (char *)malloc(query_len*4+1);
