@@ -28,8 +28,11 @@
  * AUTHOR(S): Santiago Marco-Sola <santiagomsola@gmail.com>
  * DESCRIPTION: WFA main algorithm
  */
+#ifdef __cplusplus
+extern "C"
+{
+#endif
 
-extern "C" {
 #ifndef AFFINE_WAVEFRONT_ALIGN_H_
 #define AFFINE_WAVEFRONT_ALIGN_H_
 
@@ -47,4 +50,7 @@ void affine_wavefronts_align(
     const int text_length);
 
 #endif /* AFFINE_WAVEFRONT_ALIGN_H_ */
+
+#ifdef __cplusplus
 }
+#endif
